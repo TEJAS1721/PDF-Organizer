@@ -211,18 +211,22 @@ if uploaded_file is not None:
                 x2 = st.number_input("Bottom-Right X", value=200, step=10)
                 y2 = st.number_input("Bottom-Right Y", value=100, step=10)
 
-        st.subheader("4. Page Border & Frame Selector")
-        enable_border = st.checkbox("Add Page Border")
+        st.subheader("4. Border Removal & Drawing Options")
+        remove_existing_border = st.checkbox("Erase Existing Outer Borders", help="Scubs vector drawings along outer page edges")
+
+        enable_border = st.checkbox("Add New Page Border")
         if enable_border:
-            border_color_name = st.selectbox("Border Color", ["Black", "Grey", "Blue", "Red"])
-            border_width = st.slider("Border Thickness (px)", 1, 10, 2)
-            border_inset = st.slider("Border Inset Padding (px)", 5, 50, 15)
+            border_style = st.selectbox("Border Style", ["Solid Line", "Dashed Line", "Double Line Box"])
+            border_color_name = st.selectbox("Border Color", ["Black", "Grey", "Blue", "Red", "Emerald Green"])
+            border_width = st.slider("Thickness (px)", 1, 10, 2)
+            border_inset = st.slider("Inset Padding (px)", 5, 50, 15)
 
             color_map = {
                 "Black": (0, 0, 0),
                 "Grey": (0.5, 0.5, 0.5),
                 "Blue": (0, 0.2, 0.8),
-                "Red": (0.8, 0, 0)
+                "Red": (0.8, 0, 0),
+                "Emerald Green": (0, 0.6, 0.3)
             }
             border_rgb = color_map[border_color_name]
 
@@ -250,13 +254,27 @@ if uploaded_file is not None:
 
     processed_total = len(new_doc)
 
-    # Apply Text Removal, Area Erasure, Borders, Footers, Page Numbers
+    # Apply operations
     if processed_total > 0:
         for idx in range(processed_total):
             page = new_doc[idx]
             rect = page.rect
             
-            # --- TEXT REMOVAL ---
+            # --- REMOVE EXISTING OUTSIDE BORDERS ---
+            if remove_existing_border:
+                # Blank out outer edges (top, bottom, left, right margins)
+                margin_px = 25
+                outer_strips = [
+                    pymupdf.Rect(0, 0, rect.width, margin_px),                        # Top edge
+                    pymupdf.Rect(0, rect.height - margin_px, rect.width, rect.height),# Bottom edge
+                    pymupdf.Rect(0, 0, margin_px, rect.height),                       # Left edge
+                    pymupdf.Rect(rect.width - margin_px, 0, rect.width, rect.height) # Right edge
+                ]
+                for strip in outer_strips:
+                    page.add_redact_annot(strip, fill=(1, 1, 1))
+                page.apply_redactions()
+
+            # --- TARGET TEXT REMOVAL ---
             if text_to_remove:
                 text_instances = page.search_for(text_to_remove)
                 for inst in text_instances:
@@ -269,7 +287,7 @@ if uploaded_file is not None:
                 page.add_redact_annot(erase_rect, fill=fill_rgb)
                 page.apply_redactions()
             
-            # --- PAGE BORDER SELECTOR ---
+            # --- NEW PAGE BORDER SELECTOR ---
             if enable_border:
                 border_rect = pymupdf.Rect(
                     border_inset,
@@ -278,8 +296,26 @@ if uploaded_file is not None:
                     rect.height - border_inset
                 )
                 shape = page.new_shape()
-                shape.draw_rect(border_rect)
-                shape.finish(color=border_rgb, width=border_width)
+                
+                if border_style == "Solid Line":
+                    shape.draw_rect(border_rect)
+                    shape.finish(color=border_rgb, width=border_width)
+                elif border_style == "Dashed Line":
+                    shape.draw_rect(border_rect)
+                    shape.finish(color=border_rgb, width=border_width, dashes="[4 4] 0")
+                elif border_style == "Double Line Box":
+                    shape.draw_rect(border_rect)
+                    shape.finish(color=border_rgb, width=border_width)
+                    
+                    inner_rect = pymupdf.Rect(
+                        border_inset + 4,
+                        border_inset + 4,
+                        rect.width - border_inset - 4,
+                        rect.height - border_inset - 4
+                    )
+                    shape.draw_rect(inner_rect)
+                    shape.finish(color=border_rgb, width=1)
+
                 shape.commit()
 
             # --- INSERT FOOTER TEXT ---
