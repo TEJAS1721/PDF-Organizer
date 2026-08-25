@@ -11,7 +11,6 @@ st.set_page_config(page_title="PDF Advanced Editor", page_icon="📄", layout="w
 # ==========================================
 # 🔌 DATABASE & EMAIL INITIALIZATION
 # ==========================================
-# Robust fallback retrieval for secrets
 def get_secret(section, key, fallback=None):
     if section in st.secrets and key in st.secrets[section]:
         return st.secrets[section][key]
@@ -28,7 +27,6 @@ RESEND_API_KEY = get_secret("resend", "api_key")
 ADMIN_EMAIL = get_secret("resend", "admin_email", "tn1721c@gmail.com")
 APP_URL = get_secret("resend", "app_url", "https://pdf-organizer-mpjrzbydznasweblbkeebh.streamlit.app/")
 
-# Initialize Supabase safely
 supabase: Client = None
 if SUPABASE_URL and SUPABASE_KEY:
     try:
@@ -40,7 +38,6 @@ if RESEND_API_KEY:
     resend.api_key = RESEND_API_KEY
 
 
-# Helper: Send Email Notification to Admin for Verification
 def send_approval_request_email(username, email, approval_token):
     approve_link = f"{APP_URL}/?action=approve&token={approval_token}"
     reject_link = f"{APP_URL}/?action=reject&token={approval_token}"
@@ -68,7 +65,6 @@ def send_approval_request_email(username, email, approval_token):
 # 🔐 AUTHENTICATION & APPROVAL SYSTEM
 # ==========================================
 def auth_system():
-    # Handle Admin Email Action Links (Approve / Reject via Token)
     query_params = st.query_params
     if "action" in query_params and "token" in query_params:
         token = query_params["token"]
@@ -102,7 +98,7 @@ def auth_system():
 
             if submit_login:
                 if not supabase:
-                    st.error("Database connection missing. Please check your Supabase credentials in Streamlit secrets.")
+                    st.error("Database connection missing.")
                 else:
                     res = supabase.table("users").select("*").or_(f"username.eq.{login_user},email.eq.{login_user}").execute()
                     if res.data:
@@ -112,12 +108,16 @@ def auth_system():
                         elif user_record["status"] == "rejected":
                             st.error("❌ Your request for access was declined.")
                         elif user_record["status"] == "approved":
-                            if bcrypt.checkpw(login_pass.encode("utf-8"), user_record["password_hash"].encode("utf-8")):
-                                st.session_state["authenticated"] = True
-                                st.session_state["user"] = user_record["username"]
-                                st.rerun()
-                            else:
-                                st.error("Incorrect password.")
+                            try:
+                                stored_hash = user_record["password_hash"].encode("utf-8")
+                                if bcrypt.checkpw(login_pass.encode("utf-8"), stored_hash):
+                                    st.session_state["authenticated"] = True
+                                    st.session_state["user"] = user_record["username"]
+                                    st.rerun()
+                                else:
+                                    st.error("Incorrect password.")
+                            except Exception as e:
+                                st.error("Password verification error. Please register again.")
                     else:
                         st.error("User not found.")
 
@@ -132,9 +132,8 @@ def auth_system():
             if submit_request:
                 if req_username and req_email and req_password:
                     if not supabase:
-                        st.error("Database connection missing. Please check your Supabase credentials in Streamlit secrets.")
+                        st.error("Database connection missing.")
                     else:
-                        # Hash password & generate unique approval token securely
                         hashed_pw = bcrypt.hashpw(req_password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
                         token = secrets.token_urlsafe(32)
 
@@ -147,12 +146,11 @@ def auth_system():
                                 "approval_token": token
                             }).execute()
 
-                            # Send Email Verification Alert to Admin
                             if RESEND_API_KEY:
                                 send_approval_request_email(req_username, req_email, token)
-                                st.success("✅ Access request submitted! Verification email sent to the administrator.")
+                                st.success("✅ Access request submitted! Verification email sent to admin.")
                             else:
-                                st.warning("✅ Access request submitted, but Resend API Key is missing so no verification email was dispatched.")
+                                st.warning("✅ Access request submitted.")
 
                         except Exception as e:
                             st.error("User or Email already exists.")
@@ -176,7 +174,6 @@ with st.sidebar:
         st.session_state["authenticated"] = False
         st.rerun()
 
-# --- PDF Editor Logic Continues ---
 uploaded_file = st.file_uploader("Upload a PDF file", type=["pdf"])
 
 if uploaded_file is not None:
