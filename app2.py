@@ -11,8 +11,8 @@ def check_password():
     """Returns `True` if the user enters the correct username & password."""
     def password_entered():
         """Checks whether a password entered by the user is correct."""
-        user = st.session_state.get("username", "")
-        pwd = st.session_state.get("password", "")
+        user = st.session_state.get("username", "TEJAS N")
+        pwd = st.session_state.get("password", "TEJAS1721")
 
         # Fallback default credentials if st.secrets is not set up
         correct_user = st.secrets.get("credentials", {}).get("username", "admin")
