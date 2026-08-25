@@ -65,6 +65,7 @@ def send_approval_request_email(username, email, approval_token):
 # 🔐 AUTHENTICATION & APPROVAL SYSTEM
 # ==========================================
 def auth_system():
+    # Handle token approvals from admin email clicks
     query_params = st.query_params
     if "action" in query_params and "token" in query_params:
         token = query_params["token"]
@@ -91,13 +92,15 @@ def auth_system():
 
     # --- TAB 1: LOGIN ---
     with tab1:
-        with st.form("login_form"):
-            login_user = st.text_input("Username or Email")
-            login_pass = st.text_input("Password", type="password")
+        with st.form("login_form_unique"):
+            login_user = st.text_input("Username or Email", key="login_user_input")
+            login_pass = st.text_input("Password", type="password", key="login_pass_input")
             submit_login = st.form_submit_button("Log In")
 
             if submit_login:
-                if not supabase:
+                if not login_user or not login_pass:
+                    st.warning("Please fill in both fields.")
+                elif not supabase:
                     st.error("Database connection missing.")
                 else:
                     res = supabase.table("users").select("*").or_(f"username.eq.{login_user},email.eq.{login_user}").execute()
@@ -123,10 +126,10 @@ def auth_system():
 
     # --- TAB 2: REQUEST ACCESS ---
     with tab2:
-        with st.form("request_form"):
-            req_username = st.text_input("Preferred Username")
-            req_email = st.text_input("Email Address")
-            req_password = st.text_input("Set Password", type="password")
+        with st.form("request_form_unique"):
+            req_username = st.text_input("Preferred Username", key="req_user_input")
+            req_email = st.text_input("Email Address", key="req_email_input")
+            req_password = st.text_input("Set Password", type="password", key="req_pass_input")
             submit_request = st.form_submit_button("Submit Access Request")
 
             if submit_request:
@@ -146,11 +149,10 @@ def auth_system():
                                 "approval_token": token
                             }).execute()
 
+                            st.success("✅ Access request submitted successfully! Pending admin approval.")
+
                             if RESEND_API_KEY:
                                 send_approval_request_email(req_username, req_email, token)
-                                st.success("✅ Access request submitted! Verification email sent to admin.")
-                            else:
-                                st.warning("✅ Access request submitted.")
 
                         except Exception as e:
                             st.error("User or Email already exists.")
