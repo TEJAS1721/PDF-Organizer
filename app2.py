@@ -3,7 +3,60 @@ import pymupdf
 import streamlit as st
 
 st.set_page_config(page_title="PDF Advanced Editor & Cleaner", page_icon="📄", layout="wide")
-st.title("📄 PDF Border Stripper, Header/Footer & Heading Scaler Tool")
+
+# ==========================================
+# 🔐 AUTHENTICATION FUNCTIONALITY
+# ==========================================
+def check_password():
+    """Returns `True` if the user enters the correct username & password."""
+    def password_entered():
+        """Checks whether a password entered by the user is correct."""
+        user = st.session_state.get("username", "")
+        pwd = st.session_state.get("password", "")
+
+        # Fallback default credentials if st.secrets is not set up
+        correct_user = st.secrets.get("credentials", {}).get("username", "admin")
+        correct_pwd = st.secrets.get("credentials", {}).get("password", "pdfsecret123")
+
+        if user == correct_user and pwd == correct_pwd:
+            st.session_state["password_correct"] = True
+            del st.session_state["password"]  # Don't store password in session
+            del st.session_state["username"]
+        else:
+            st.session_state["password_correct"] = False
+
+    if st.session_state.get("password_correct", False):
+        return True
+
+    # Render login form
+    st.title("🔒 Restricted Access")
+    st.write("Please log in with the authorized credentials to use the PDF Editor.")
+
+    with st.form("login_form"):
+        st.text_input("Username", key="username")
+        st.text_input("Password", type="password", key="password")
+        st.form_submit_button("Log In", on_click=password_entered)
+
+    if "password_correct" in st.session_state and not st.session_state["password_correct"]:
+        st.error("😕 Username or password incorrect.")
+
+    return False
+
+# Stop execution if authentication fails
+if not check_password():
+    st.stop()
+
+# ==========================================
+# 📄 MAIN APP (Protected Content)
+# ==========================================
+st.title("📄 PDF Auto-Align, Border & Footer Editor")
+
+# Add a Logout button in the sidebar
+with st.sidebar:
+    st.write("Logged in as Authorized Member")
+    if st.button("Log Out"):
+        st.session_state["password_correct"] = False
+        st.rerun()
 
 # 1. Upload File
 uploaded_file = st.file_uploader("Upload a PDF file", type=["pdf"])
@@ -24,10 +77,7 @@ if uploaded_file is not None:
         st.caption("Crop outer edges to remove pre-existing headers, footers, or borders.")
         
         strip_margins = st.checkbox("Enable Margin Trimming (Crop Out Existing Borders/Footers)")
-        crop_top = 0
-        crop_bottom = 0
-        crop_left = 0
-        crop_right = 0
+        crop_top, crop_bottom, crop_left, crop_right = 0, 0, 0, 0
         
         if strip_margins:
             c1, c2 = st.columns(2)
@@ -113,12 +163,10 @@ if uploaded_file is not None:
         for idx, page in enumerate(processed_doc):
             page_num = idx + 1
             
-            # Rotation
             if align_mode == "Manual Rotation":
                 page.set_rotation(manual_angle)
 
             if page_num in selected_pages:
-                # 1. Trimming Existing Borders/Headers/Footers via CropBox
                 if strip_margins:
                     rect = page.rect
                     new_crop = pymupdf.Rect(
@@ -130,19 +178,15 @@ if uploaded_file is not None:
                     page.set_cropbox(new_crop)
 
                 rect = page.rect
-                width, height = rect.width, rect.height
 
-                # 2. Heading Rescaling & Contrast Adjustments
                 if enable_scaling:
                     text_instances = page.get_text("dict")["blocks"]
                     for b in text_instances:
-                        if b.get("type") == 0:  # Text block
+                        if b.get("type") == 0:
                             for l in b["lines"]:
                                 for s in l["spans"]:
                                     if s["size"] >= min_heading_size:
-                                        # Draw white background box over old heading
                                         page.draw_rect(s["bbox"], color=(1, 1, 1), fill=(1, 1, 1))
-                                        # Re-insert text scaled up/down proportionally
                                         new_size = s["size"] * heading_scale_factor
                                         page.insert_text(
                                             pymupdf.Point(s["bbox"][0], s["bbox"][3] - 2),
@@ -151,7 +195,6 @@ if uploaded_file is not None:
                                             color=pymupdf.sRGB_to_pdf(s["color"])
                                         )
 
-                # 3. Apply New Borders
                 if border_type != "None":
                     border_rect = pymupdf.Rect(
                         rect.x0 + border_margin, 
@@ -179,7 +222,6 @@ if uploaded_file is not None:
                         shape.finish(color=border_color, width=1)
                     shape.commit()
 
-                # 4. Apply New Footer
                 if footer_type != "None":
                     if footer_type == "Page Numbering (Page X of Y)":
                         footer_text = f"Page {page_num} of {total_pages}"
