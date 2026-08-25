@@ -1,5 +1,5 @@
 import io
-import pymupdf  # Updated from fitz
+import pymupdf
 import streamlit as st
 
 st.set_page_config(page_title="PDF Editor Tool", page_icon="📄", layout="wide")
@@ -87,18 +87,14 @@ if uploaded_file is not None:
 
     # 6. Process PDF Button
     if st.button("🚀 Process & Generate PDF", type="primary"):
-        output_doc = pymupdf.open()
-        
         for idx, page in enumerate(doc):
             page_num = idx + 1
             
             # --- Alignment Logic ---
             if align_mode == "Auto-Align (Detect text orientation)":
                 try:
-                    # Detect text rotation angle safely
                     text_page = page.get_textpage()
                     dict_data = text_page.extractBLOCKS()
-                    # PyMuPDF manages text direction internally; retain or normalize base rotation
                     if page.rotation != 0:
                         page.set_rotation(0)
                 except Exception:
@@ -147,23 +143,21 @@ if uploaded_file is not None:
                     else:
                         footer_text = custom_footer_text
 
-                    y_pos = height - 20
-                    if footer_position == "Left":
-                        x_pos = 30
-                        align = 0
-                    elif footer_position == "Right":
-                        x_pos = width - 30
-                        align = 2
-                    else:  # Center
-                        x_pos = width / 2
-                        align = 1
+                    # Footer Bounding Box
+                    footer_rect = pymupdf.Rect(30, height - 35, width - 30, height - 10)
 
-                    page.insert_text(
-                        pymupdf.Point(x_pos, y_pos),
+                    align_mapping = {
+                        "Left": pymupdf.TEXT_ALIGN_LEFT,
+                        "Center": pymupdf.TEXT_ALIGN_CENTER,
+                        "Right": pymupdf.TEXT_ALIGN_RIGHT
+                    }
+
+                    page.insert_textbox(
+                        footer_rect,
                         footer_text,
                         fontsize=10,
                         color=(0.2, 0.2, 0.2),
-                        align=align
+                        align=align_mapping[footer_position]
                     )
 
         # Output Stream
