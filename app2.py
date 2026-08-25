@@ -6,7 +6,7 @@ import bcrypt
 import resend
 from supabase import create_client, Client
 
-st.set_page_config(page_title="PDF Advanced Editor", page_icon="📄", layout="wide")
+st.set_page_config(page_title="PDF Advanced Editor & Redactor", page_icon="📄", layout="wide")
 
 # ==========================================
 # 🔌 DATABASE & EMAIL INITIALIZATION
@@ -167,7 +167,7 @@ if not auth_system():
 # ==========================================
 # 📄 MAIN APP (Protected PDF Editor Toolkit)
 # ==========================================
-st.title("📄 Advanced PDF Editor & Organizer")
+st.title("📄 Advanced PDF Editor & Text Redactor")
 
 with st.sidebar:
     st.write(f"Logged in as: **{st.session_state.get('user', 'Member')}**")
@@ -175,41 +175,50 @@ with st.sidebar:
         st.session_state["authenticated"] = False
         st.rerun()
     st.divider()
-    st.header("⚙️ Editor Control Panel")
+    st.header("⚙️ Editor Controls")
 
 uploaded_file = st.file_uploader("Upload a PDF file to edit", type=["pdf"])
 
 if uploaded_file is not None:
-    # Read original bytes
     pdf_bytes = uploaded_file.read()
     doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
     total_pages = len(doc)
     
-    st.success(f"Successfully loaded PDF with **{total_pages}** pages.")
+    st.success(f"Loaded PDF with **{total_pages}** pages.")
 
     # --- SIDEBAR CONTROLS ---
     with st.sidebar:
-        st.subheader("1. Page Management")
-        
-        # Rotation
-        rotate_angle = st.selectbox("Rotate All Pages", [0, 90, 180, 270], help="Select degrees to rotate all pages clockwise.")
-        
-        # Delete Pages
+        st.subheader("1. Page Operations")
+        rotate_angle = st.selectbox("Rotate Pages", [0, 90, 180, 270])
         pages_to_delete = st.multiselect(
-            "Select Pages to Remove",
-            options=list(range(1, total_pages + 1)),
-            help="Choose page numbers to delete from the output."
+            "Remove Pages",
+            options=list(range(1, total_pages + 1))
         )
 
-        st.subheader("2. Headers & Footers")
-        footer_text = st.text_input("Custom Footer Text", placeholder="e.g., Confidential - Company Use Only")
-        add_page_numbers = st.checkbox("Add Page Numbers (Page X of Y)", value=True)
+        st.subheader("2. Target Text Removal")
+        text_to_remove = st.text_input("Text Phrase to Erase", placeholder="e.g., Confidential")
+        fill_color_choice = st.selectbox("Redaction Fill Color", ["White (Clean Erase)", "Black (Redact)"])
+        fill_rgb = (1, 1, 1) if fill_color_choice.startswith("White") else (0, 0, 0)
 
-        st.subheader("3. Compression & Optimization")
-        compress_pdf = st.checkbox("Optimize & Compress Output", value=True)
+        st.subheader("3. Coordinate-Based Area Removal")
+        enable_area_erase = st.checkbox("Erase Custom Area Coordinates")
+        if enable_area_erase:
+            c1, c2 = st.columns(2)
+            with c1:
+                x1 = st.number_input("Top-Left X", value=50, step=10)
+                y1 = st.number_input("Top-Left Y", value=50, step=10)
+            with c2:
+                x2 = st.number_input("Bottom-Right X", value=200, step=10)
+                y2 = st.number_input("Bottom-Right Y", value=100, step=10)
+
+        st.subheader("4. Headers & Footers")
+        footer_text = st.text_input("Custom Footer Text", placeholder="Confidential Document")
+        add_page_numbers = st.checkbox("Add Page Numbers", value=True)
+
+        st.subheader("5. Optimization")
+        compress_pdf = st.checkbox("Compress Output File", value=True)
 
     # --- EDITOR LOGIC ---
-    # Create working copy of PDF
     new_doc = pymupdf.open()
     
     # Process page inclusions & rotations
@@ -226,13 +235,26 @@ if uploaded_file is not None:
 
     processed_total = len(new_doc)
 
-    # Apply Footers and Page Numbers
+    # Apply Text Removal / Redaction, Area Erasure, Footers, Page Numbers
     if processed_total > 0:
         for idx in range(processed_total):
             page = new_doc[idx]
             rect = page.rect
             
-            # Footer text placement
+            # --- TEXT REMOVAL ---
+            if text_to_remove:
+                text_instances = page.search_for(text_to_remove)
+                for inst in text_instances:
+                    page.add_redact_annot(inst, fill=fill_rgb)
+                page.apply_redactions()
+
+            # --- COORDINATE-BASED AREA REMOVAL ---
+            if enable_area_erase:
+                erase_rect = pymupdf.Rect(x1, y1, x2, y2)
+                page.add_redact_annot(erase_rect, fill=fill_rgb)
+                page.apply_redactions()
+            
+            # --- INSERT FOOTER TEXT ---
             if footer_text:
                 page.insert_text(
                     pymupdf.Point(36, rect.height - 20),
@@ -241,7 +263,7 @@ if uploaded_file is not None:
                     color=(0.3, 0.3, 0.3)
                 )
                 
-            # Page Number placement (bottom right)
+            # --- INSERT PAGE NUMBER ---
             if add_page_numbers:
                 pg_str = f"Page {idx + 1} of {processed_total}"
                 page.insert_text(
@@ -251,25 +273,22 @@ if uploaded_file is not None:
                     color=(0.3, 0.3, 0.3)
                 )
 
-    # --- MAIN INTERFACE TABS ---
+    # --- TABS INTERFACE ---
     tab_preview, tab_export, tab_text = st.tabs(["👁️ Live Preview", "💾 Export File", "📝 Extract Text"])
 
-    # TAB 1: LIVE PREVIEW
     with tab_preview:
         if processed_total == 0:
-            st.warning("All pages have been deleted. Please unselect pages to remove.")
+            st.warning("All pages deleted.")
         else:
-            st.write(f"Displaying preview of **{processed_total}** page(s):")
+            st.write(f"Previewing **{processed_total}** page(s):")
             cols = st.columns(2)
             for idx in range(processed_total):
                 page = new_doc[idx]
                 pix = page.get_pixmap(dpi=100)
                 img_bytes = pix.tobytes("png")
-                
                 with cols[idx % 2]:
                     st.image(img_bytes, caption=f"Page {idx + 1}", use_container_width=True)
 
-    # TAB 2: EXPORT OPTIONS
     with tab_export:
         st.subheader("Download Modified PDF")
         if processed_total > 0:
@@ -286,35 +305,10 @@ if uploaded_file is not None:
                 mime="application/pdf"
             )
 
-            st.divider()
-            st.subheader("Export Pages as PNG Images")
-            selected_page_to_export = st.number_input("Select Page Number to Export as PNG", min_value=1, max_value=processed_total, value=1)
-            
-            if st.button("Generate Page Image"):
-                export_page = new_doc[selected_page_to_export - 1]
-                pix = export_page.get_pixmap(dpi=150)
-                img_data = pix.tobytes("png")
-                
-                st.download_button(
-                    label=f"📥 Download Page {selected_page_to_export} as PNG",
-                    data=img_data,
-                    file_name=f"page_{selected_page_to_export}.png",
-                    mime="image/png"
-                )
-
-    # TAB 3: TEXT EXTRACTION
     with tab_text:
-        st.subheader("Extract Raw Text Content")
+        st.subheader("Extract Raw Text")
         if processed_total > 0:
             full_text = ""
             for idx in range(processed_total):
                 full_text += f"--- Page {idx + 1} ---\n" + new_doc[idx].get_text() + "\n\n"
-                
-            st.text_area("Extracted Document Text", full_text, height=350)
-            
-            st.download_button(
-                label="📥 Download Text File (.txt)",
-                data=full_text,
-                file_name="extracted_text.txt",
-                mime="text/plain"
-            )
+            st.text_area("Extracted Text", full_text, height=350)
