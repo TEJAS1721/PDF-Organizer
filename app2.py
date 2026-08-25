@@ -25,7 +25,7 @@ SUPABASE_URL = get_secret("supabase", "url")
 SUPABASE_KEY = get_secret("supabase", "key")
 RESEND_API_KEY = get_secret("resend", "api_key")
 ADMIN_EMAIL = get_secret("resend", "admin_email", "tn1721c@gmail.com")
-ADMIN_PASSWORD = get_secret("resend", "admin_password", "AdminSecret123!") # Default fallback password
+ADMIN_PASSWORD = get_secret("resend", "admin_password", "Tejas1721") # Updated default fallback password
 APP_URL = get_secret("resend", "app_url", "https://pdf-organizer-mpjrzbydznasweblbkeebh.streamlit.app/")
 
 supabase: Client = None
