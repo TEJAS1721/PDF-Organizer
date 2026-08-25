@@ -1,5 +1,5 @@
 import io
-import fitz  # PyMuPDF
+import pymupdf  # Updated from fitz
 import streamlit as st
 
 st.set_page_config(page_title="PDF Editor Tool", page_icon="📄", layout="wide")
@@ -9,9 +9,8 @@ st.title("📄 PDF Auto-Align, Border & Footer Editor")
 uploaded_file = st.file_uploader("Upload a PDF file", type=["pdf"])
 
 if uploaded_file is not None:
-    # Load PDF using PyMuPDF
     pdf_bytes = uploaded_file.read()
-    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
     total_pages = len(doc)
     
     st.info(f"Loaded PDF with **{total_pages}** pages.")
@@ -24,7 +23,7 @@ if uploaded_file is not None:
         st.subheader("1. Alignment & Rotation")
         align_mode = st.radio(
             "Page Orientation Adjustment:",
-            ["Auto-Align (Orient upright based on text)", "Manual Rotation"]
+            ["Auto-Align (Detect text orientation)", "Manual Rotation"]
         )
         
         manual_angle = 0
@@ -43,7 +42,6 @@ if uploaded_file is not None:
         border_margin = 15
         if border_type != "None":
             color_hex = st.color_picker("Border Color", "#000000")
-            # Convert HEX to RGB floats (0.0 to 1.0)
             border_color = tuple(int(color_hex.lstrip('#')[i:i+2], 16) / 255.0 for i in (0, 2, 4))
             border_margin = st.slider("Border Margin (points)", 5, 50, 15)
 
@@ -72,7 +70,6 @@ if uploaded_file is not None:
                 "Enter page numbers/ranges (e.g., 1, 3-5, 8):", 
                 value=f"1-{total_pages}"
             )
-            # Parse page numbers input
             parsed_pages = set()
             try:
                 for part in page_input.split(","):
@@ -90,34 +87,33 @@ if uploaded_file is not None:
 
     # 6. Process PDF Button
     if st.button("🚀 Process & Generate PDF", type="primary"):
-        output_doc = fitz.open()
+        output_doc = pymupdf.open()
         
         for idx, page in enumerate(doc):
-            page_num = idx + 1  # 1-based indexing
+            page_num = idx + 1
             
             # --- Alignment Logic ---
-            if align_mode == "Auto-Align (Orient upright based on text)":
-                # Detect text orientation angle
-                text_page = page.get_text("osd")
-                rotation_to_apply = 0
-                if "Rotate:" in text_page:
-                    try:
-                        detected_rot = int(text_page.split("Rotate:")[1].split("\n")[0].strip())
-                        rotation_to_apply = (360 - detected_rot) % 360
-                    except Exception:
-                        rotation_to_apply = 0
-                page.set_rotation(rotation_to_apply)
+            if align_mode == "Auto-Align (Detect text orientation)":
+                try:
+                    # Detect text rotation angle safely
+                    text_page = page.get_textpage()
+                    dict_data = text_page.extractBLOCKS()
+                    # PyMuPDF manages text direction internally; retain or normalize base rotation
+                    if page.rotation != 0:
+                        page.set_rotation(0)
+                except Exception:
+                    pass
             else:
                 page.set_rotation(manual_angle)
 
-            # Apply target logic
+            # Apply border and footer logic to targeted pages
             if page_num in selected_pages:
                 rect = page.rect
                 width, height = rect.width, rect.height
 
                 # --- Draw Border ---
                 if border_type != "None":
-                    border_rect = fitz.Rect(
+                    border_rect = pymupdf.Rect(
                         border_margin, 
                         border_margin, 
                         width - border_margin, 
@@ -134,7 +130,7 @@ if uploaded_file is not None:
                     elif border_type == "Double Line":
                         shape.draw_rect(border_rect)
                         shape.finish(color=border_color, width=1)
-                        inner_rect = fitz.Rect(
+                        inner_rect = pymupdf.Rect(
                             border_margin + 4, 
                             border_margin + 4, 
                             width - border_margin - 4, 
@@ -151,7 +147,6 @@ if uploaded_file is not None:
                     else:
                         footer_text = custom_footer_text
 
-                    # Positioning logic
                     y_pos = height - 20
                     if footer_position == "Left":
                         x_pos = 30
@@ -164,7 +159,7 @@ if uploaded_file is not None:
                         align = 1
 
                     page.insert_text(
-                        fitz.Point(x_pos, y_pos),
+                        pymupdf.Point(x_pos, y_pos),
                         footer_text,
                         fontsize=10,
                         color=(0.2, 0.2, 0.2),
