@@ -2,14 +2,13 @@ import io
 import pymupdf
 import streamlit as st
 
-st.set_page_config(page_title="PDF Editor & Previewer", page_icon="📄", layout="wide")
-st.title("📄 PDF Auto-Align, Border & Footer Editor")
+st.set_page_config(page_title="PDF Advanced Editor & Cleaner", page_icon="📄", layout="wide")
+st.title("📄 PDF Border Stripper, Header/Footer & Heading Scaler Tool")
 
 # 1. Upload File
 uploaded_file = st.file_uploader("Upload a PDF file", type=["pdf"])
 
 if uploaded_file is not None:
-    # Read bytes into session memory so we can re-process easily
     pdf_bytes = uploaded_file.read()
     doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
     total_pages = len(doc)
@@ -19,23 +18,55 @@ if uploaded_file is not None:
 
     col1, col2 = st.columns(2)
 
-    # 2. Alignment & Rotation Options
+    # 2. Existing Elements Removal (Crop Margins)
     with col1:
-        st.subheader("1. Alignment & Rotation")
+        st.subheader("1. Remove Existing Borders/Header/Footer")
+        st.caption("Crop outer edges to remove pre-existing headers, footers, or borders.")
+        
+        strip_margins = st.checkbox("Enable Margin Trimming (Crop Out Existing Borders/Footers)")
+        crop_top = 0
+        crop_bottom = 0
+        crop_left = 0
+        crop_right = 0
+        
+        if strip_margins:
+            c1, c2 = st.columns(2)
+            with c1:
+                crop_top = st.slider("Crop Top (Header area)", 0, 100, 30)
+                crop_bottom = st.slider("Crop Bottom (Footer area)", 0, 100, 30)
+            with c2:
+                crop_left = st.slider("Crop Left Margin", 0, 100, 20)
+                crop_right = st.slider("Crop Right Margin", 0, 100, 20)
+
+    # 3. Heading Contrast & Scaling Options
+    with col2:
+        st.subheader("2. Heading Contrast & Text Rescaling")
+        st.caption("Scale headings and titles based on text contrast/size.")
+        
+        enable_scaling = st.checkbox("Enable Heading Rescaling")
+        heading_scale_factor = 1.0
+        min_heading_size = 14.0
+        
+        if enable_scaling:
+            min_heading_size = st.slider("Minimum font size to consider as Heading (pt):", 10.0, 36.0, 14.0)
+            heading_scale_factor = st.slider("Heading Scaling Factor:", 0.5, 2.0, 1.25, step=0.05)
+
+    st.divider()
+    col3, col4 = st.columns(2)
+
+    # 4. New Border & Alignment Options
+    with col3:
+        st.subheader("3. New Border & Alignment Settings")
         align_mode = st.radio(
             "Page Orientation Adjustment:",
-            ["Auto-Align (Detect text orientation)", "Manual Rotation"]
+            ["Keep Original", "Manual Rotation"]
         )
-        
         manual_angle = 0
         if align_mode == "Manual Rotation":
             manual_angle = st.selectbox("Select rotation angle for all pages:", [0, 90, 180, 270])
 
-    # 3. Border Options
-    with col2:
-        st.subheader("2. Border Settings")
         border_type = st.selectbox(
-            "Select Border Style:",
+            "Select New Border Style:",
             ["None", "Solid Line", "Dashed Line", "Double Line"]
         )
         
@@ -46,31 +77,20 @@ if uploaded_file is not None:
             border_color = tuple(int(color_hex.lstrip('#')[i:i+2], 16) / 255.0 for i in (0, 2, 4))
             border_margin = st.slider("Border Margin (points)", 5, 50, 15)
 
-    st.divider()
-    col3, col4 = st.columns(2)
-
-    # 4. Footer Options
-    with col3:
-        st.subheader("3. Footer Settings")
-        footer_type = st.radio("Footer Content:", ["None", "Page Numbering (Page X of Y)", "Custom Text"])
-        
+    # 5. New Footer & Target Pages Options
+    with col4:
+        st.subheader("4. New Footer & Target Pages")
+        footer_type = st.radio("New Footer Content:", ["None", "Page Numbering (Page X of Y)", "Custom Text"])
         custom_footer_text = ""
         if footer_type == "Custom Text":
             custom_footer_text = st.text_input("Enter Custom Footer Text:", "Confidential Document")
             
         footer_position = st.selectbox("Footer Alignment:", ["Center", "Left", "Right"])
 
-    # 5. Target Pages Options
-    with col4:
-        st.subheader("4. Target Pages")
-        apply_pages = st.radio("Apply Border & Footer to:", ["All Pages", "Specific Pages"])
-        
+        apply_pages = st.radio("Apply Modifications to:", ["All Pages", "Specific Pages"])
         selected_pages = list(range(1, total_pages + 1))
         if apply_pages == "Specific Pages":
-            page_input = st.text_input(
-                "Enter page numbers/ranges (e.g., 1, 3-5, 8):", 
-                value=f"1-{total_pages}"
-            )
+            page_input = st.text_input("Enter page numbers/ranges (e.g., 1, 3-5, 8):", value=f"1-{total_pages}")
             parsed_pages = set()
             try:
                 for part in page_input.split(","):
@@ -86,40 +106,59 @@ if uploaded_file is not None:
 
     st.divider()
 
-    # --- Processing Function ---
+    # --- PDF Processing Engine ---
     def process_pdf():
-        # Re-open fresh document stream
         processed_doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
         
         for idx, page in enumerate(processed_doc):
             page_num = idx + 1
             
-            # Rotation Logic
-            if align_mode == "Auto-Align (Detect text orientation)":
-                try:
-                    text_page = page.get_textpage()
-                    dict_data = text_page.extractBLOCKS()
-                    if page.rotation != 0:
-                        page.set_rotation(0)
-                except Exception:
-                    pass
-            else:
+            # Rotation
+            if align_mode == "Manual Rotation":
                 page.set_rotation(manual_angle)
 
-            # Targeted Pages Modifications
             if page_num in selected_pages:
+                # 1. Trimming Existing Borders/Headers/Footers via CropBox
+                if strip_margins:
+                    rect = page.rect
+                    new_crop = pymupdf.Rect(
+                        rect.x0 + crop_left,
+                        rect.y0 + crop_top,
+                        rect.x1 - crop_right,
+                        rect.y1 - crop_bottom
+                    )
+                    page.set_cropbox(new_crop)
+
                 rect = page.rect
                 width, height = rect.width, rect.height
 
-                # Border Logic
+                # 2. Heading Rescaling & Contrast Adjustments
+                if enable_scaling:
+                    text_instances = page.get_text("dict")["blocks"]
+                    for b in text_instances:
+                        if b.get("type") == 0:  # Text block
+                            for l in b["lines"]:
+                                for s in l["spans"]:
+                                    if s["size"] >= min_heading_size:
+                                        # Draw white background box over old heading
+                                        page.draw_rect(s["bbox"], color=(1, 1, 1), fill=(1, 1, 1))
+                                        # Re-insert text scaled up/down proportionally
+                                        new_size = s["size"] * heading_scale_factor
+                                        page.insert_text(
+                                            pymupdf.Point(s["bbox"][0], s["bbox"][3] - 2),
+                                            s["text"],
+                                            fontsize=new_size,
+                                            color=pymupdf.sRGB_to_pdf(s["color"])
+                                        )
+
+                # 3. Apply New Borders
                 if border_type != "None":
                     border_rect = pymupdf.Rect(
-                        border_margin, 
-                        border_margin, 
-                        width - border_margin, 
-                        height - border_margin
+                        rect.x0 + border_margin, 
+                        rect.y0 + border_margin, 
+                        rect.x1 - border_margin, 
+                        rect.y1 - border_margin
                     )
-                    
                     shape = page.new_shape()
                     if border_type == "Solid Line":
                         shape.draw_rect(border_rect)
@@ -131,23 +170,23 @@ if uploaded_file is not None:
                         shape.draw_rect(border_rect)
                         shape.finish(color=border_color, width=1)
                         inner_rect = pymupdf.Rect(
-                            border_margin + 4, 
-                            border_margin + 4, 
-                            width - border_margin - 4, 
-                            height - border_margin - 4
+                            rect.x0 + border_margin + 4, 
+                            rect.y0 + border_margin + 4, 
+                            rect.x1 - border_margin - 4, 
+                            rect.y1 - border_margin - 4
                         )
                         shape.draw_rect(inner_rect)
                         shape.finish(color=border_color, width=1)
                     shape.commit()
 
-                # Footer Logic
+                # 4. Apply New Footer
                 if footer_type != "None":
                     if footer_type == "Page Numbering (Page X of Y)":
                         footer_text = f"Page {page_num} of {total_pages}"
                     else:
                         footer_text = custom_footer_text
 
-                    footer_rect = pymupdf.Rect(30, height - 35, width - 30, height - 10)
+                    footer_rect = pymupdf.Rect(rect.x0 + 30, rect.y1 - 35, rect.x1 - 30, rect.y1 - 10)
 
                     align_mapping = {
                         "Left": pymupdf.TEXT_ALIGN_LEFT,
@@ -162,9 +201,9 @@ if uploaded_file is not None:
                         color=(0.2, 0.2, 0.2),
                         align=align_mapping[footer_position]
                     )
+
         return processed_doc
 
-    # Process document in memory for preview and download
     modified_doc = process_pdf()
 
     # 6. Live Preview Section
@@ -182,7 +221,6 @@ if uploaded_file is not None:
         )
         st.caption(f"Showing page {preview_page_num} of {total_pages}")
         
-        # Output Bytes for download button
         output_buffer = io.BytesIO()
         modified_doc.save(output_buffer)
         output_bytes = output_buffer.getvalue()
@@ -196,9 +234,8 @@ if uploaded_file is not None:
         )
 
     with preview_col2:
-        # Render selected page to image
         page_to_preview = modified_doc[preview_page_num - 1]
-        pix = page_to_preview.get_pixmap(dpi=150)  # Render page to Pixmap image
+        pix = page_to_preview.get_pixmap(dpi=150)
         img_bytes = pix.tobytes("png")
         
         st.image(img_bytes, caption=f"Page {preview_page_num} Preview", use_container_width=True)
