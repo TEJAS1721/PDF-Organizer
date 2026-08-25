@@ -177,6 +177,7 @@ with st.sidebar:
     st.write(f"Logged in as: **{st.session_state.get('user', 'Member')}**")
     if st.button("Log Out"):
         st.session_state["authenticated"] = False
+        st.session_state.pop("processed_pdf", None)
         st.rerun()
     st.divider()
 
@@ -197,7 +198,7 @@ with app_tabs[0]:
         doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
         total_pages = len(doc)
         
-        st.success(f"Loaded PDF with **{total_pages}** pages.")
+        st.info(f"Loaded source PDF with **{total_pages}** page(s). Configure your options on the sidebar and click **Save & Apply Changes**.")
 
         # --- SIDEBAR CONTROLS ---
         with st.sidebar:
@@ -270,167 +271,186 @@ with app_tabs[0]:
             st.subheader("7. Optimization")
             compress_pdf = st.checkbox("Compress Output File", value=True)
 
-        # --- EDITOR LOGIC ---
-        new_doc = pymupdf.open()
-        
-        # Process page inclusions & rotations
-        for i in range(total_pages):
-            page_num = i + 1
-            if page_num in pages_to_delete:
-                continue
-                
-            page = doc[i]
-            if rotate_angle > 0:
-                page.set_rotation((page.rotation + rotate_angle) % 360)
-                
-            new_doc.insert_pdf(doc, from_page=i, to_page=i)
+            st.divider()
+            st.subheader("8. Save Operations")
+            save_clicked = st.button("💾 Save & Apply Changes", type="primary", use_container_width=True)
 
-        processed_total = len(new_doc)
-
-        # Apply operations
-        if processed_total > 0:
-            for idx in range(processed_total):
-                page = new_doc[idx]
-                rect = page.rect
-                
-                # --- REMOVE EXISTING OUTSIDE BORDERS ---
-                if remove_existing_border:
-                    margin_px = 25
-                    outer_strips = [
-                        pymupdf.Rect(0, 0, rect.width, margin_px),
-                        pymupdf.Rect(0, rect.height - margin_px, rect.width, rect.height),
-                        pymupdf.Rect(0, 0, margin_px, rect.height),
-                        pymupdf.Rect(rect.width - margin_px, 0, rect.width, rect.height)
-                    ]
-                    for strip in outer_strips:
-                        page.add_redact_annot(strip, fill=(1, 1, 1))
-                    page.apply_redactions()
-
-                # --- TARGET TEXT REMOVAL ---
-                if text_to_remove:
-                    text_instances = page.search_for(text_to_remove)
-                    for inst in text_instances:
-                        page.add_redact_annot(inst, fill=fill_rgb)
-                    page.apply_redactions()
-
-                # --- COORDINATE-BASED AREA REMOVAL ---
-                if enable_area_erase:
-                    erase_rect = pymupdf.Rect(x1, y1, x2, y2)
-                    page.add_redact_annot(erase_rect, fill=fill_rgb)
-                    page.apply_redactions()
-                
-                # --- PAGE BORDER SELECTOR ---
-                if enable_border:
-                    border_rect = pymupdf.Rect(
-                        border_inset,
-                        border_inset,
-                        rect.width - border_inset,
-                        rect.height - border_inset
-                    )
-                    shape = page.new_shape()
+        # --- SAVE PROCESSING LOGIC ---
+        if save_clicked:
+            new_doc = pymupdf.open()
+            
+            # Process page inclusions & rotations
+            for i in range(total_pages):
+                page_num = i + 1
+                if page_num in pages_to_delete:
+                    continue
                     
-                    if border_style == "Solid Line":
-                        shape.draw_rect(border_rect)
-                        shape.finish(color=border_rgb, width=border_width)
-                    elif border_style == "Dashed Line":
-                        shape.draw_rect(border_rect)
-                        shape.finish(color=border_rgb, width=border_width, dashes="[4 4] 0")
-                    elif border_style == "Double Line Box":
-                        shape.draw_rect(border_rect)
-                        shape.finish(color=border_rgb, width=border_width)
-                        
-                        inner_rect = pymupdf.Rect(
-                            border_inset + 4,
-                            border_inset + 4,
-                            rect.width - border_inset - 4,
-                            rect.height - border_inset - 4
-                        )
-                        shape.draw_rect(inner_rect)
-                        shape.finish(color=border_rgb, width=1)
-
-                    shape.commit()
-
-                # --- WATERMARK OVERLAY ---
-                if enable_watermark:
-                    center_point = pymupdf.Point(rect.width / 2, rect.height / 2)
+                page = doc[i]
+                if rotate_angle > 0:
+                    page.set_rotation((page.rotation + rotate_angle) % 360)
                     
-                    if wm_type == "Text" and wm_text:
-                        page.insert_text(
-                            center_point,
-                            wm_text,
-                            fontsize=wm_fontsize,
-                            color=(0.5, 0.5, 0.5),
-                            fill_opacity=wm_opacity,
-                            morph=(center_point, pymupdf.Matrix(wm_angle))
-                        )
-                    elif wm_type == "Image" and wm_image_file is not None:
-                        img_bytes_wm = wm_image_file.getvalue()
-                        wm_rect = pymupdf.Rect(
-                            rect.width * 0.25,
-                            rect.height * 0.35,
-                            rect.width * 0.75,
-                            rect.height * 0.65
-                        )
-                        page.insert_image(wm_rect, stream=img_bytes_wm, overlay=True)
+                new_doc.insert_pdf(doc, from_page=i, to_page=i)
 
-                # --- INSERT FOOTER TEXT ---
-                if footer_text:
-                    page.insert_text(
-                        pymupdf.Point(36, rect.height - 20),
-                        footer_text,
-                        fontsize=9,
-                        color=(0.3, 0.3, 0.3)
-                    )
-                    
-                # --- INSERT PAGE NUMBER ---
-                if add_page_numbers:
-                    pg_str = f"Page {idx + 1} of {processed_total}"
-                    page.insert_text(
-                        pymupdf.Point(rect.width - 100, rect.height - 20),
-                        pg_str,
-                        fontsize=9,
-                        color=(0.3, 0.3, 0.3)
-                    )
+            processed_total = len(new_doc)
 
-        # --- TABS INTERFACE ---
-        tab_preview, tab_export, tab_text = st.tabs(["👁️ Live Preview", "💾 Export File", "📝 Extract Text"])
-
-        with tab_preview:
-            if processed_total == 0:
-                st.warning("All pages deleted.")
-            else:
-                st.write(f"Previewing **{processed_total}** page(s):")
-                cols = st.columns(2)
+            # Apply modifications to pages
+            if processed_total > 0:
                 for idx in range(processed_total):
                     page = new_doc[idx]
-                    pix = page.get_pixmap(dpi=100)
-                    img_bytes = pix.tobytes("png")
-                    with cols[idx % 2]:
-                        st.image(img_bytes, caption=f"Page {idx + 1}", use_container_width=True)
+                    rect = page.rect
+                    
+                    # --- REMOVE EXISTING OUTSIDE BORDERS ---
+                    if remove_existing_border:
+                        margin_px = 25
+                        outer_strips = [
+                            pymupdf.Rect(0, 0, rect.width, margin_px),
+                            pymupdf.Rect(0, rect.height - margin_px, rect.width, rect.height),
+                            pymupdf.Rect(0, 0, margin_px, rect.height),
+                            pymupdf.Rect(rect.width - margin_px, 0, rect.width, rect.height)
+                        ]
+                        for strip in outer_strips:
+                            page.add_redact_annot(strip, fill=(1, 1, 1))
+                        page.apply_redactions()
 
-        with tab_export:
-            st.subheader("Download Modified PDF")
-            if processed_total > 0:
-                out_buffer = io.BytesIO()
-                if compress_pdf:
-                    new_doc.save(out_buffer, deflate=True, garbage=4)
+                    # --- TARGET TEXT REMOVAL ---
+                    if text_to_remove:
+                        text_instances = page.search_for(text_to_remove)
+                        for inst in text_instances:
+                            page.add_redact_annot(inst, fill=fill_rgb)
+                        page.apply_redactions()
+
+                    # --- COORDINATE-BASED AREA REMOVAL ---
+                    if enable_area_erase:
+                        erase_rect = pymupdf.Rect(x1, y1, x2, y2)
+                        page.add_redact_annot(erase_rect, fill=fill_rgb)
+                        page.apply_redactions()
+                    
+                    # --- PAGE BORDER SELECTOR ---
+                    if enable_border:
+                        border_rect = pymupdf.Rect(
+                            border_inset,
+                            border_inset,
+                            rect.width - border_inset,
+                            rect.height - border_inset
+                        )
+                        shape = page.new_shape()
+                        
+                        if border_style == "Solid Line":
+                            shape.draw_rect(border_rect)
+                            shape.finish(color=border_rgb, width=border_width)
+                        elif border_style == "Dashed Line":
+                            shape.draw_rect(border_rect)
+                            shape.finish(color=border_rgb, width=border_width, dashes="[4 4] 0")
+                        elif border_style == "Double Line Box":
+                            shape.draw_rect(border_rect)
+                            shape.finish(color=border_rgb, width=border_width)
+                            
+                            inner_rect = pymupdf.Rect(
+                                border_inset + 4,
+                                border_inset + 4,
+                                rect.width - border_inset - 4,
+                                rect.height - border_inset - 4
+                            )
+                            shape.draw_rect(inner_rect)
+                            shape.finish(color=border_rgb, width=1)
+
+                        shape.commit()
+
+                    # --- WATERMARK OVERLAY ---
+                    if enable_watermark:
+                        center_point = pymupdf.Point(rect.width / 2, rect.height / 2)
+                        
+                        if wm_type == "Text" and wm_text:
+                            page.insert_text(
+                                center_point,
+                                wm_text,
+                                fontsize=wm_fontsize,
+                                color=(0.5, 0.5, 0.5),
+                                fill_opacity=wm_opacity,
+                                morph=(center_point, pymupdf.Matrix(wm_angle))
+                            )
+                        elif wm_type == "Image" and wm_image_file is not None:
+                            img_bytes_wm = wm_image_file.getvalue()
+                            wm_rect = pymupdf.Rect(
+                                rect.width * 0.25,
+                                rect.height * 0.35,
+                                rect.width * 0.75,
+                                rect.height * 0.65
+                            )
+                            page.insert_image(wm_rect, stream=img_bytes_wm, overlay=True)
+
+                    # --- INSERT FOOTER TEXT ---
+                    if footer_text:
+                        page.insert_text(
+                            pymupdf.Point(36, rect.height - 20),
+                            footer_text,
+                            fontsize=9,
+                            color=(0.3, 0.3, 0.3)
+                        )
+                        
+                    # --- INSERT PAGE NUMBER ---
+                    if add_page_numbers:
+                        pg_str = f"Page {idx + 1} of {processed_total}"
+                        page.insert_text(
+                            pymupdf.Point(rect.width - 100, rect.height - 20),
+                            pg_str,
+                            fontsize=9,
+                            color=(0.3, 0.3, 0.3)
+                        )
+
+            # Store the resulting PDF in memory session
+            out_buffer = io.BytesIO()
+            if compress_pdf:
+                new_doc.save(out_buffer, deflate=True, garbage=4)
+            else:
+                new_doc.save(out_buffer)
+            
+            st.session_state["processed_pdf"] = out_buffer.getvalue()
+            st.session_state["processed_doc_pages"] = processed_total
+            st.toast("✅ Changes saved successfully!", icon="🎉")
+
+        # --- RENDER PREVIEW / EXPORT TABS ---
+        if "processed_pdf" in st.session_state:
+            st.success("✅ Showing saved output preview.")
+            
+            # Re-open saved buffer for reading in tabs
+            saved_doc = pymupdf.open(stream=st.session_state["processed_pdf"], filetype="pdf")
+            saved_total = len(saved_doc)
+
+            tab_preview, tab_export, tab_text = st.tabs(["👁️ Saved Preview", "💾 Download Saved File", "📝 Extract Saved Text"])
+
+            with tab_preview:
+                if saved_total == 0:
+                    st.warning("All pages deleted.")
                 else:
-                    new_doc.save(out_buffer)
-                
-                st.download_button(
-                    label="📥 Download Processed PDF",
-                    data=out_buffer.getvalue(),
-                    file_name="modified_document.pdf",
-                    mime="application/pdf"
-                )
+                    st.write(f"Previewing **{saved_total}** page(s):")
+                    cols = st.columns(2)
+                    for idx in range(saved_total):
+                        page = saved_doc[idx]
+                        pix = page.get_pixmap(dpi=100)
+                        img_bytes = pix.tobytes("png")
+                        with cols[idx % 2]:
+                            st.image(img_bytes, caption=f"Page {idx + 1}", use_container_width=True)
 
-        with tab_text:
-            st.subheader("Extract Raw Text")
-            if processed_total > 0:
-                full_text = ""
-                for idx in range(processed_total):
-                    full_text += f"--- Page {idx + 1} ---\n" + new_doc[idx].get_text() + "\n\n"
-                st.text_area("Extracted Text", full_text, height=350)
+            with tab_export:
+                st.subheader("Download Modified PDF")
+                if saved_total > 0:
+                    st.download_button(
+                        label="📥 Download Saved PDF",
+                        data=st.session_state["processed_pdf"],
+                        file_name="modified_document.pdf",
+                        mime="application/pdf"
+                    )
+
+            with tab_text:
+                st.subheader("Extract Text from Saved PDF")
+                if saved_total > 0:
+                    full_text = ""
+                    for idx in range(saved_total):
+                        full_text += f"--- Page {idx + 1} ---\n" + saved_doc[idx].get_text() + "\n\n"
+                    st.text_area("Extracted Text", full_text, height=350)
+        else:
+            st.warning("👈 Configure settings in the sidebar and click **💾 Save & Apply Changes** to process and view your PDF.")
 
 # ==========================================
 # TAB 2: IN-APP USER ACCESS MANAGEMENT DASHBOARD
