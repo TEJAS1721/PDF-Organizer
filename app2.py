@@ -25,6 +25,7 @@ SUPABASE_URL = get_secret("supabase", "url")
 SUPABASE_KEY = get_secret("supabase", "key")
 RESEND_API_KEY = get_secret("resend", "api_key")
 ADMIN_EMAIL = get_secret("resend", "admin_email", "tn1721c@gmail.com")
+ADMIN_PASSWORD = get_secret("resend", "admin_password", "AdminSecret123!") # Default fallback password
 APP_URL = get_secret("resend", "app_url", "https://pdf-organizer-mpjrzbydznasweblbkeebh.streamlit.app/")
 
 supabase: Client = None
@@ -169,25 +170,36 @@ if not auth_system():
     st.stop()
 
 # ==========================================
-# 📄 MAIN APP (Protected PDF Editor & Admin Dashboard)
+# 📄 MAIN APP & NAVIGATION
 # ==========================================
+current_user_email = st.session_state.get("user_email", "").lower().strip()
+is_primary_admin = (current_user_email == ADMIN_EMAIL.lower().strip())
+
 st.title("📄 Advanced PDF Editor & Redactor")
 
 with st.sidebar:
     st.write(f"Logged in as: **{st.session_state.get('user', 'Member')}**")
+    if is_primary_admin:
+        st.caption("👑 **Role:** Administrator")
+    else:
+        st.caption("👤 **Role:** Standard User")
+
     if st.button("Log Out"):
         st.session_state["authenticated"] = False
         st.session_state.pop("processed_pdf", None)
+        st.session_state.pop("admin_unlocked", None)
         st.rerun()
     st.divider()
 
-# Create main app tabs including the Admin Panel
+# Create standard tabs visible to everyone
 app_tabs = st.tabs(["📄 PDF Operations", "🛡️ Admin Access Management"])
+tab_pdf = app_tabs[0]
+tab_admin = app_tabs[1]
 
 # ==========================================
 # TAB 1: PDF OPERATIONS
 # ==========================================
-with app_tabs[0]:
+with tab_pdf:
     with st.sidebar:
         st.header("⚙️ Editor Controls")
 
@@ -413,7 +425,6 @@ with app_tabs[0]:
         if "processed_pdf" in st.session_state:
             st.success("✅ Showing saved output preview.")
             
-            # Re-open saved buffer for reading in tabs
             saved_doc = pymupdf.open(stream=st.session_state["processed_pdf"], filetype="pdf")
             saved_total = len(saved_doc)
 
@@ -453,64 +464,88 @@ with app_tabs[0]:
             st.warning("👈 Configure settings in the sidebar and click **💾 Save & Apply Changes** to process and view your PDF.")
 
 # ==========================================
-# TAB 2: IN-APP USER ACCESS MANAGEMENT DASHBOARD
+# TAB 2: ADMIN ACCESS MANAGEMENT (PASSWORD LOCKED)
 # ==========================================
-with app_tabs[1]:
-    st.header("🛡️ User Access Control Panel")
-    st.write("Approve pending registration requests or modify existing user access rights directly from within the application.")
-
-    if not supabase:
-        st.error("Database connection missing.")
-    else:
-        # Fetch pending requests
-        pending_res = supabase.table("users").select("*").eq("status", "pending").execute()
-        pending_users = pending_res.data if pending_res.data else []
-
-        st.subheader(f"⏳ Pending Access Requests ({len(pending_users)})")
-        if pending_users:
-            for u in pending_users:
-                col1, col2, col3, col4 = st.columns([3, 3, 2, 2])
-                with col1:
-                    st.write(f"**Username:** {u.get('username')}")
-                with col2:
-                    st.write(f"**Email:** {u.get('email')}")
-                with col3:
-                    if st.button("✅ Approve", key=f"app_{u['id']}"):
-                        supabase.table("users").update({"status": "approved"}).eq("id", u["id"]).execute()
-                        st.success(f"Approved {u['username']}!")
-                        st.rerun()
-                with col4:
-                    if st.button("❌ Reject", key=f"rej_{u['id']}"):
-                        supabase.table("users").update({"status": "rejected"}).eq("id", u["id"]).execute()
-                        st.warning(f"Rejected {u['username']}.")
-                        st.rerun()
-                st.divider()
+with tab_admin:
+    st.header("🛡️ Admin Access Control Panel")
+    
+    # Check if primary admin or password already unlocked in session
+    if is_primary_admin or st.session_state.get("admin_unlocked", False):
+        if is_primary_admin:
+            st.success("👑 Logged in as Primary Administrator.")
         else:
-            st.info("No pending access requests at this moment.")
+            st.success("🔓 Admin mode unlocked via password.")
+            if st.button("Lock Admin Dashboard"):
+                st.session_state["admin_unlocked"] = False
+                st.rerun()
 
-        st.divider()
+        st.write("Approve pending registration requests or modify existing user access rights.")
 
-        # Fetch all registered users
-        all_res = supabase.table("users").select("id, username, email, status, created_at").neq("status", "pending").execute()
-        all_users = all_res.data if all_res.data else []
+        if not supabase:
+            st.error("Database connection missing.")
+        else:
+            # Fetch pending requests
+            pending_res = supabase.table("users").select("*").eq("status", "pending").execute()
+            pending_users = pending_res.data if pending_res.data else []
 
-        st.subheader(f"👥 Manage Registered Accounts ({len(all_users)})")
-        if all_users:
-            for u in all_users:
-                col1, col2, col3, col4 = st.columns([3, 3, 2, 2])
-                with col1:
-                    st.write(f"**{u.get('username')}**")
-                with col2:
-                    st.write(f"{u.get('email')}")
-                with col3:
-                    status = u.get("status")
-                    st.write(f"Status: **{status.upper()}**")
-                with col4:
-                    if status == "approved":
-                        if st.button("Revoke Access", key=f"rev_{u['id']}"):
-                            supabase.table("users").update({"status": "rejected"}).eq("id", u["id"]).execute()
-                            st.rerun()
-                    else:
-                        if st.button("Re-Approve", key=f"reapp_{u['id']}"):
+            st.subheader(f"⏳ Pending Access Requests ({len(pending_users)})")
+            if pending_users:
+                for u in pending_users:
+                    col1, col2, col3, col4 = st.columns([3, 3, 2, 2])
+                    with col1:
+                        st.write(f"**Username:** {u.get('username')}")
+                    with col2:
+                        st.write(f"**Email:** {u.get('email')}")
+                    with col3:
+                        if st.button("✅ Approve", key=f"app_{u['id']}"):
                             supabase.table("users").update({"status": "approved"}).eq("id", u["id"]).execute()
+                            st.success(f"Approved {u['username']}!")
                             st.rerun()
+                    with col4:
+                        if st.button("❌ Reject", key=f"rej_{u['id']}"):
+                            supabase.table("users").update({"status": "rejected"}).eq("id", u["id"]).execute()
+                            st.warning(f"Rejected {u['username']}.")
+                            st.rerun()
+                    st.divider()
+            else:
+                st.info("No pending access requests at this moment.")
+
+            st.divider()
+
+            # Fetch all registered users
+            all_res = supabase.table("users").select("id, username, email, status, created_at").neq("status", "pending").execute()
+            all_users = all_res.data if all_res.data else []
+
+            st.subheader(f"👥 Manage Registered Accounts ({len(all_users)})")
+            if all_users:
+                for u in all_users:
+                    col1, col2, col3, col4 = st.columns([3, 3, 2, 2])
+                    with col1:
+                        st.write(f"**{u.get('username')}**")
+                    with col2:
+                        st.write(f"{u.get('email')}")
+                    with col3:
+                        status = u.get("status")
+                        st.write(f"Status: **{status.upper()}**")
+                    with col4:
+                        if status == "approved":
+                            if st.button("Revoke Access", key=f"rev_{u['id']}"):
+                                supabase.table("users").update({"status": "rejected"}).eq("id", u["id"]).execute()
+                                st.rerun()
+                        else:
+                            if st.button("Re-Approve", key=f"reapp_{u['id']}"):
+                                supabase.table("users").update({"status": "approved"}).eq("id", u["id"]).execute()
+                                st.rerun()
+    else:
+        st.warning("🔒 This section is password protected for administrative use only.")
+        with st.form("admin_unlock_form"):
+            entered_password = st.text_input("Enter Admin Password", type="password")
+            unlock_submitted = st.form_submit_button("Unlock Dashboard")
+            
+            if unlock_submitted:
+                if entered_password == ADMIN_PASSWORD:
+                    st.session_state["admin_unlocked"] = True
+                    st.success("🔓 Access granted!")
+                    st.rerun()
+                else:
+                    st.error("❌ Incorrect admin password.")
