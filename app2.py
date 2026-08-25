@@ -11,15 +11,30 @@ st.set_page_config(page_title="PDF Advanced Editor", page_icon="📄", layout="w
 # ==========================================
 # 🔌 DATABASE & EMAIL INITIALIZATION
 # ==========================================
-SUPABASE_URL = st.secrets.get("supabase", {}).get("url")
-SUPABASE_KEY = st.secrets.get("supabase", {}).get("key")
-RESEND_API_KEY = st.secrets.get("resend", {}).get("api_key")
+# Robust fallback retrieval for secrets
+def get_secret(section, key, fallback=None):
+    if section in st.secrets and key in st.secrets[section]:
+        return st.secrets[section][key]
+    upper_key = f"{section.upper()}_{key.upper()}"
+    if upper_key in st.secrets:
+        return st.secrets[upper_key]
+    if key in st.secrets:
+        return st.secrets[key]
+    return fallback
 
-# Admin target email updated to your email: tn1721c@gmail.com
-ADMIN_EMAIL = st.secrets.get("resend", {}).get("admin_email", "tn1721c@gmail.com")
-APP_URL = st.secrets.get("resend", {}).get("app_url", "http://localhost:8501")
+SUPABASE_URL = get_secret("supabase", "url")
+SUPABASE_KEY = get_secret("supabase", "key")
+RESEND_API_KEY = get_secret("resend", "api_key")
+ADMIN_EMAIL = get_secret("resend", "admin_email", "tn1721c@gmail.com")
+APP_URL = get_secret("resend", "app_url", "https://pdf-organizer-mpjrzbydznasweblbkeebh.streamlit.app/")
 
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY) if SUPABASE_URL and SUPABASE_KEY else None
+# Initialize Supabase safely
+supabase: Client = None
+if SUPABASE_URL and SUPABASE_KEY:
+    try:
+        supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+    except Exception as e:
+        st.error(f"Failed to connect to Supabase: {e}")
 
 if RESEND_API_KEY:
     resend.api_key = RESEND_API_KEY
@@ -87,7 +102,7 @@ def auth_system():
 
             if submit_login:
                 if not supabase:
-                    st.error("Database connection missing.")
+                    st.error("Database connection missing. Please check your Supabase credentials in Streamlit secrets.")
                 else:
                     res = supabase.table("users").select("*").or_(f"username.eq.{login_user},email.eq.{login_user}").execute()
                     if res.data:
@@ -117,7 +132,7 @@ def auth_system():
             if submit_request:
                 if req_username and req_email and req_password:
                     if not supabase:
-                        st.error("Database connection missing.")
+                        st.error("Database connection missing. Please check your Supabase credentials in Streamlit secrets.")
                     else:
                         # Hash password & generate unique approval token securely
                         hashed_pw = bcrypt.hashpw(req_password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
@@ -132,7 +147,7 @@ def auth_system():
                                 "approval_token": token
                             }).execute()
 
-                            # Send Email Verification Alert to Admin (tn1721c@gmail.com)
+                            # Send Email Verification Alert to Admin
                             if RESEND_API_KEY:
                                 send_approval_request_email(req_username, req_email, token)
                                 st.success("✅ Access request submitted! Verification email sent to the administrator.")
