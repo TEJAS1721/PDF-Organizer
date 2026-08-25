@@ -167,7 +167,7 @@ if not auth_system():
 # ==========================================
 # 📄 MAIN APP (Protected PDF Editor Toolkit)
 # ==========================================
-st.title("📄 Advanced PDF Editor & Text Redactor")
+st.title("📄 Advanced PDF Editor & Redactor")
 
 with st.sidebar:
     st.write(f"Logged in as: **{st.session_state.get('user', 'Member')}**")
@@ -211,11 +211,26 @@ if uploaded_file is not None:
                 x2 = st.number_input("Bottom-Right X", value=200, step=10)
                 y2 = st.number_input("Bottom-Right Y", value=100, step=10)
 
-        st.subheader("4. Headers & Footers")
+        st.subheader("4. Page Border & Frame Selector")
+        enable_border = st.checkbox("Add Page Border")
+        if enable_border:
+            border_color_name = st.selectbox("Border Color", ["Black", "Grey", "Blue", "Red"])
+            border_width = st.slider("Border Thickness (px)", 1, 10, 2)
+            border_inset = st.slider("Border Inset Padding (px)", 5, 50, 15)
+
+            color_map = {
+                "Black": (0, 0, 0),
+                "Grey": (0.5, 0.5, 0.5),
+                "Blue": (0, 0.2, 0.8),
+                "Red": (0.8, 0, 0)
+            }
+            border_rgb = color_map[border_color_name]
+
+        st.subheader("5. Headers & Footers")
         footer_text = st.text_input("Custom Footer Text", placeholder="Confidential Document")
         add_page_numbers = st.checkbox("Add Page Numbers", value=True)
 
-        st.subheader("5. Optimization")
+        st.subheader("6. Optimization")
         compress_pdf = st.checkbox("Compress Output File", value=True)
 
     # --- EDITOR LOGIC ---
@@ -235,7 +250,7 @@ if uploaded_file is not None:
 
     processed_total = len(new_doc)
 
-    # Apply Text Removal / Redaction, Area Erasure, Footers, Page Numbers
+    # Apply Text Removal, Area Erasure, Borders, Footers, Page Numbers
     if processed_total > 0:
         for idx in range(processed_total):
             page = new_doc[idx]
@@ -254,6 +269,19 @@ if uploaded_file is not None:
                 page.add_redact_annot(erase_rect, fill=fill_rgb)
                 page.apply_redactions()
             
+            # --- PAGE BORDER SELECTOR ---
+            if enable_border:
+                border_rect = pymupdf.Rect(
+                    border_inset,
+                    border_inset,
+                    rect.width - border_inset,
+                    rect.height - border_inset
+                )
+                shape = page.new_shape()
+                shape.draw_rect(border_rect)
+                shape.finish(color=border_rgb, width=border_width)
+                shape.commit()
+
             # --- INSERT FOOTER TEXT ---
             if footer_text:
                 page.insert_text(
