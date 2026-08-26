@@ -1,5 +1,9 @@
-streamlit>=1.30.0
-PyMuPDF>=1.23.0
-bcrypt>=4.0.0
-resend>=0.7.0
-supabase>=2.0.0
+streamlit
+pymupdf
+streamlit-drawable-canvas
+numpy
+Pillow
+bcrypt
+resend
+supabase
+pytesseract
