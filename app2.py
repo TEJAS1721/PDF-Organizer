@@ -8,13 +8,20 @@ import bcrypt
 import resend
 from supabase import create_client, Client
 
-# Optional imports for OCR
+# Optional imports for OCR & Canvas drawing
 try:
     import pytesseract
     from PIL import Image as PILImage
     OCR_AVAILABLE = True
 except ImportError:
     OCR_AVAILABLE = False
+
+try:
+    from streamlit_drawable_canvas import st_canvas
+    import numpy as np
+    CANVAS_AVAILABLE = True
+except ImportError:
+    CANVAS_AVAILABLE = False
 
 st.set_page_config(page_title="PDF Advanced Editor & Redactor", page_icon="📄", layout="wide")
 
@@ -232,15 +239,53 @@ with tab_pdf:
 
             st.subheader("4. Digital Signature Insertion")
             enable_signature = st.checkbox("Add Signature Stamp")
-            sig_file = None
             sig_page = 1
+            sig_bytes = None
+            
             if enable_signature:
-                sig_file = st.file_uploader("Upload Transparent Signature PNG", type=["png", "jpg"])
+                sig_method = st.radio("Signature Input Method", ["Draw with Mouse / Touch", "Upload PNG Image"])
                 sig_page = st.number_input("Page Number for Signature", min_value=1, max_value=total_pages, value=1)
                 sig_x = st.number_input("Signature X Position", value=100)
                 sig_y = st.number_input("Signature Y Position", value=700)
-                sig_w = st.number_input("Signature Width", value=150)
-                sig_h = st.number_input("Signature Height", value=50)
+                sig_w = st.number_input("Signature Width", value=200)
+                sig_h = st.number_input("Signature Height", value=80)
+
+                if sig_method == "Draw with Mouse / Touch":
+                    st.write("Draw your signature below:")
+                    if CANVAS_AVAILABLE:
+                        canvas_result = st_canvas(
+                            fill_color="rgba(255, 255, 255, 0)",
+                            stroke_width=2,
+                            stroke_color="#000000",
+                            background_color="#FFFFFF",
+                            height=150,
+                            width=300,
+                            drawing_mode="freedraw",
+                            key="canvas_signature",
+                        )
+                        if canvas_result.image_data is not None:
+                            img_array = canvas_result.image_data.astype(np.uint8)
+                            sig_img = PILImage.fromarray(img_array)
+                            sig_img = sig_img.convert("RGBA")
+                            data = sig_img.getdata()
+                            new_data = []
+                            for item in data:
+                                # Strip white background to make signature transparent
+                                if item[0] > 240 and item[1] > 240 and item[2] > 240:
+                                    new_data.append((255, 255, 255, 0))
+                                else:
+                                    new_data.append(item)
+                            sig_img.putdata(new_data)
+                            
+                            buf = io.BytesIO()
+                            sig_img.save(buf, format="PNG")
+                            sig_bytes = buf.getvalue()
+                    else:
+                        st.error("Package `streamlit-drawable-canvas` is missing. Install via pip.")
+                else:
+                    sig_file = st.file_uploader("Upload Transparent Signature PNG", type=["png", "jpg"])
+                    if sig_file is not None:
+                        sig_bytes = sig_file.getvalue()
 
             st.subheader("5. Watermark & Borders")
             enable_watermark = st.checkbox("Add Watermark")
@@ -309,8 +354,7 @@ with tab_pdf:
                         page.insert_text(center_point, wm_text, fontsize=45, color=(0.7, 0.7, 0.7), fill_opacity=0.3, morph=(center_point, pymupdf.Matrix(45)))
 
                     # Signature stamping on target page
-                    if enable_signature and sig_file is not None and (idx + 1) == sig_page:
-                        sig_bytes = sig_file.getvalue()
+                    if enable_signature and sig_bytes is not None and (idx + 1) == sig_page:
                         sig_rect = pymupdf.Rect(sig_x, sig_y, sig_x + sig_w, sig_y + sig_h)
                         page.insert_image(sig_rect, stream=sig_bytes, overlay=True)
 
