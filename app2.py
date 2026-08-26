@@ -258,7 +258,7 @@ with tab_pdf:
             output_password = st.text_input("Set Download Password", type="password") if encrypt_pdf else ""
 
             st.divider()
-            save_clicked = st.button("💾 Save & Apply Changes", type="primary", use_container_width=True)
+            save_clicked = st.button("💾 Save & Apply Changes", type="primary", width="stretch")
 
         if save_clicked:
             new_doc = pymupdf.open()
@@ -281,8 +281,7 @@ with tab_pdf:
                     if enable_ocr and OCR_AVAILABLE and not page.get_text().strip():
                         pix = page.get_pixmap(dpi=150)
                         img = PILImage.open(io.BytesIO(pix.tobytes("png")))
-                        ocr_text = pytesseract.image_to_string(img)
-                        # Embed OCR text layer invisibly if needed
+                        _ = pytesseract.image_to_string(img)
                     
                     # Text removal or replacement
                     if text_to_remove:
@@ -330,7 +329,11 @@ with tab_pdf:
 
         if "processed_pdf" in st.session_state:
             st.success("✅ Output ready for preview & download.")
-            saved_doc = pymupdf.open(stream=st.session_state["processed_pdf"], filetype="pdf", password=output_password if encrypt_pdf else None)
+            
+            saved_doc = pymupdf.open(stream=st.session_state["processed_pdf"], filetype="pdf")
+            if encrypt_pdf and output_password:
+                saved_doc.authenticate(output_password)
+                
             saved_total = len(saved_doc)
 
             tab_preview, tab_export, tab_text = st.tabs(["👁️ Preview", "💾 Download", "📝 Extracted Text"])
@@ -339,7 +342,7 @@ with tab_pdf:
                 for idx in range(saved_total):
                     pix = saved_doc[idx].get_pixmap(dpi=100)
                     with cols[idx % 2]:
-                        st.image(pix.tobytes("png"), caption=f"Page {idx + 1}", use_container_width=True)
+                        st.image(pix.tobytes("png"), caption=f"Page {idx + 1}", width="stretch")
             with tab_export:
                 st.download_button("📥 Download Modified PDF", data=st.session_state["processed_pdf"], file_name="secured_document.pdf", mime="application/pdf")
             with tab_text:
