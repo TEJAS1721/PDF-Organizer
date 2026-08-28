@@ -1,9 +1,9 @@
-pymupdf
 streamlit
+pymupdf
 bcrypt
 resend
-supabase
 pytesseract
 pillow
 streamlit-drawable-canvas
 numpy
+supabase
