@@ -209,13 +209,42 @@ with tab_pdf:
         doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
         total_pages = len(doc)
         
-        st.info(f"Loaded source PDF with **{total_pages}** page(s). Configure options in the sidebar and click **Save & Apply Changes**.")
+        st.info(f"Loaded source PDF with **{total_pages}** page(s). Manage page layout below and configure redaction/watermark options in the sidebar.")
+
+        # ==========================================
+        # INTERACTIVE THUMBNAIL PAGE MANAGER
+        # ==========================================
+        st.subheader("🖼️ Interactive Page Thumbnail Manager")
+        st.caption("Visually rearrange pages, rotate individually, duplicate, or delete pages before saving.")
+
+        if "page_order" not in st.session_state or len(st.session_state.get("page_order", [])) != total_pages:
+            st.session_state["page_order"] = list(range(total_pages))
+
+        cols_per_row = 3
+        grid_cols = st.columns(cols_per_row)
+
+        ui_page_configs = []
+        for idx, orig_page_idx in enumerate(st.session_state["page_order"]):
+            col_idx = idx % cols_per_row
+            with grid_cols[col_idx]:
+                page_obj = doc[orig_page_idx]
+                pix = page_obj.get_pixmap(dpi=70)
+                st.image(pix.tobytes("png"), caption=f"Page {orig_page_idx + 1} (Original)", use_column_width=True)
+                
+                new_pos = st.number_input(f"Target Position P{orig_page_idx+1}", min_value=1, max_value=total_pages, value=idx+1, key=f"pos_{orig_page_idx}_{idx}")
+                rot_choice = st.selectbox(f"Rotate P{orig_page_idx+1}", [0, 90, 180, 270], index=0, key=f"rot_{orig_page_idx}_{idx}")
+                
+                c_dup, c_del = st.columns(2)
+                is_dup = c_dup.checkbox("Duplicate", key=f"dup_{orig_page_idx}_{idx}")
+                is_del = c_del.checkbox("Delete", key=f"del_{orig_page_idx}_{idx}")
+                st.divider()
+                
+                if not is_del:
+                    ui_page_configs.append((new_pos, orig_page_idx, rot_choice, is_dup))
+
+        ui_page_configs.sort(key=lambda x: x[0])
 
         with st.sidebar:
-            st.subheader("1. Page Operations & Rotation")
-            rotate_angle = st.selectbox("Rotate Pages", [0, 90, 180, 270])
-            pages_to_delete = st.multiselect("Remove Pages", options=list(range(1, total_pages + 1)))
-
             st.subheader("2. Text Redaction & Replacement")
             text_to_remove = st.text_input("Text Phrase to Erase/Replace", placeholder="e.g., Confidential")
             action_mode = st.radio("Text Action", ["Blackout / Erase", "Dynamic Text Replacement"], horizontal=True)
@@ -265,12 +294,10 @@ with tab_pdf:
                         )
                         if canvas_result.image_data is not None:
                             img_array = canvas_result.image_data.astype(np.uint8)
-                            sig_img = PILImage.fromarray(img_array)
-                            sig_img = sig_img.convert("RGBA")
+                            sig_img = PILImage.fromarray(img_array).convert("RGBA")
                             data = sig_img.getdata()
                             new_data = []
                             for item in data:
-                                # Strip white background to make signature transparent
                                 if item[0] > 240 and item[1] > 240 and item[2] > 240:
                                     new_data.append((255, 255, 255, 0))
                                 else:
@@ -281,7 +308,7 @@ with tab_pdf:
                             sig_img.save(buf, format="PNG")
                             sig_bytes = buf.getvalue()
                     else:
-                        st.error("Package `streamlit-drawable-canvas` is missing. Install via pip.")
+                        st.error("Package `streamlit-drawable-canvas` is missing.")
                 else:
                     sig_file = st.file_uploader("Upload Transparent Signature PNG", type=["png", "jpg"])
                     if sig_file is not None:
@@ -295,7 +322,7 @@ with tab_pdf:
             border_inset = st.slider("Border Inset", 5, 40, 15) if enable_border else 15
 
             st.subheader("6. Scanned PDF OCR Search")
-            enable_ocr = st.checkbox("Perform OCR on Scanned Pages", help="Uses Tesseract OCR if text search returns empty")
+            enable_ocr = st.checkbox("Perform OCR on Scanned Pages")
 
             st.subheader("7. Security & Privacy")
             strip_metadata = st.checkbox("Scrub Hidden Metadata (Author/Dates)", value=True)
@@ -303,18 +330,19 @@ with tab_pdf:
             output_password = st.text_input("Set Download Password", type="password") if encrypt_pdf else ""
 
             st.divider()
-            save_clicked = st.button("💾 Save & Apply Changes", type="primary", width="stretch")
+            save_clicked = st.button("💾 Save & Apply Changes", type="primary", use_container_width=True)
 
         if save_clicked:
             new_doc = pymupdf.open()
-            for i in range(total_pages):
-                page_num = i + 1
-                if page_num in pages_to_delete:
-                    continue
-                page = doc[i]
-                if rotate_angle > 0:
-                    page.set_rotation((page.rotation + rotate_angle) % 360)
-                new_doc.insert_pdf(doc, from_page=i, to_page=i)
+            for _, orig_idx, rot, dup in ui_page_configs:
+                new_doc.insert_pdf(doc, from_page=orig_idx, to_page=orig_idx)
+                target_page = new_doc[-1]
+                target_page.set_rotation((target_page.rotation + rot) % 360)
+                
+                if dup:
+                    new_doc.insert_pdf(doc, from_page=orig_idx, to_page=orig_idx)
+                    dup_page = new_doc[-1]
+                    dup_page.set_rotation((dup_page.rotation + rot) % 360)
 
             processed_total = len(new_doc)
             if processed_total > 0:
@@ -322,13 +350,11 @@ with tab_pdf:
                     page = new_doc[idx]
                     rect = page.rect
 
-                    # OCR Check if enabled
                     if enable_ocr and OCR_AVAILABLE and not page.get_text().strip():
                         pix = page.get_pixmap(dpi=150)
                         img = PILImage.open(io.BytesIO(pix.tobytes("png")))
                         _ = pytesseract.image_to_string(img)
                     
-                    # Text removal or replacement
                     if text_to_remove:
                         text_instances = page.search_for(text_to_remove)
                         for inst in text_instances:
@@ -353,12 +379,10 @@ with tab_pdf:
                         center_point = pymupdf.Point(rect.width / 2, rect.height / 2)
                         page.insert_text(center_point, wm_text, fontsize=45, color=(0.7, 0.7, 0.7), fill_opacity=0.3, morph=(center_point, pymupdf.Matrix(45)))
 
-                    # Signature stamping on target page
                     if enable_signature and sig_bytes is not None and (idx + 1) == sig_page:
                         sig_rect = pymupdf.Rect(sig_x, sig_y, sig_x + sig_w, sig_y + sig_h)
                         page.insert_image(sig_rect, stream=sig_bytes, overlay=True)
 
-            # Metadata Strip
             if strip_metadata:
                 new_doc.set_metadata({})
 
@@ -369,11 +393,10 @@ with tab_pdf:
                 new_doc.save(out_buffer, deflate=True, garbage=4)
             
             st.session_state["processed_pdf"] = out_buffer.getvalue()
-            st.toast("✅ Changes saved securely!", icon="🎉")
+            st.toast("✅ Changes saved successfully!", icon="🎉")
 
         if "processed_pdf" in st.session_state:
             st.success("✅ Output ready for preview & download.")
-            
             saved_doc = pymupdf.open(stream=st.session_state["processed_pdf"], filetype="pdf")
             if encrypt_pdf and output_password:
                 saved_doc.authenticate(output_password)
@@ -386,7 +409,7 @@ with tab_pdf:
                 for idx in range(saved_total):
                     pix = saved_doc[idx].get_pixmap(dpi=100)
                     with cols[idx % 2]:
-                        st.image(pix.tobytes("png"), caption=f"Page {idx + 1}", width="stretch")
+                        st.image(pix.tobytes("png"), caption=f"Page {idx + 1}", use_column_width=True)
             with tab_export:
                 st.download_button("📥 Download Modified PDF", data=st.session_state["processed_pdf"], file_name="secured_document.pdf", mime="application/pdf")
             with tab_text:
@@ -394,7 +417,7 @@ with tab_pdf:
                 st.text_area("Text Content", full_text, height=300)
 
 # ==========================================
-# TAB 2: MERGE / SPLIT (Extract Pages)
+# TAB 2: MERGE / SPLIT
 # ==========================================
 with tab_merge_split:
     st.header("🔀 Multi-File Merge & Page Splitting")
@@ -428,10 +451,10 @@ with tab_merge_split:
                 st.download_button("📥 Download Extracted PDF", data=split_buffer.getvalue(), file_name="extracted_pages.pdf", mime="application/pdf")
 
 # ==========================================
-# TAB 3: IMAGE & FORM EXTRACTION
+# TAB 3: IMAGE EXTRACTION
 # ==========================================
 with tab_assets:
-    st.header("🖼️ Extract Embedded Images & Forms")
+    st.header("🖼️ Extract Embedded Images")
     asset_file = st.file_uploader("Upload PDF to extract images", type=["pdf"], key="asset_uploader")
     if asset_file:
         a_doc = pymupdf.open(stream=asset_file.read(), filetype="pdf")
@@ -443,9 +466,7 @@ with tab_assets:
                     for img_info in page.get_images(full=True):
                         xref = img_info[0]
                         base_image = a_doc.extract_image(xref)
-                        image_bytes = base_image["image"]
-                        image_ext = base_image["ext"]
-                        zf.writestr(f"page_{i+1}_img_{img_count}.{image_ext}", image_bytes)
+                        zf.writestr(f"page_{i+1}_img_{img_count}.{base_image['ext']}", base_image["image"])
                         img_count += 1
             st.success(f"Extracted {img_count} images successfully!")
             st.download_button("📥 Download Images ZIP", data=img_zip_buffer.getvalue(), file_name="extracted_images.zip", mime="application/zip")
