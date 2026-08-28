@@ -1,9 +1,9 @@
-streamlit
 pymupdf
-streamlit-drawable-canvas
-numpy
-Pillow
+streamlit
 bcrypt
 resend
 supabase
 pytesseract
+pillow
+streamlit-drawable-canvas
+numpy
