@@ -211,6 +211,14 @@ with tab_pdf:
         
         st.info(f"Loaded source PDF with **{total_pages}** page(s). Configure options in the sidebar and click **Save & Apply Changes**.")
 
+        # --- NEW: Interactive Input Document Preview ---
+        with st.expander("👁️ View Source Document Preview", expanded=False):
+            preview_cols = st.columns(2)
+            for p_idx in range(total_pages):
+                page_pix = doc[p_idx].get_pixmap(dpi=90)
+                with preview_cols[p_idx % 2]:
+                    st.image(page_pix.tobytes("png"), caption=f"Source Page {p_idx + 1}", use_container_width=True)
+
         with st.sidebar:
             st.subheader("1. Page Operations & Rotation")
             rotate_angle = st.selectbox("Rotate Pages", [0, 90, 180, 270])
