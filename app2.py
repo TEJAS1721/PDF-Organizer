@@ -209,7 +209,7 @@ with tab_pdf:
         doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
         total_pages = len(doc)
         
-        st.info(f"Loaded source PDF with **{total_pages}** page(s). Manage page layout below and configure redaction/watermark options in the sidebar.")
+        st.info(f"Loaded source PDF with **{total_pages}** page(s). Manage page layout below and configure redaction/watermark/border options in the sidebar.")
 
         # ==========================================
         # INTERACTIVE THUMBNAIL PAGE MANAGER
@@ -314,12 +314,16 @@ with tab_pdf:
                     if sig_file is not None:
                         sig_bytes = sig_file.getvalue()
 
-            st.subheader("5. Watermark & Borders")
+            st.subheader("5. Watermark & Advanced Borders")
             enable_watermark = st.checkbox("Add Watermark")
             wm_text = st.text_input("Watermark Text", value="CONFIDENTIAL") if enable_watermark else ""
             
             enable_border = st.checkbox("Add Page Border")
-            border_inset = st.slider("Border Inset", 5, 40, 15) if enable_border else 15
+            border_inset = st.slider("Border Inset (Margin)", 5, 40, 15) if enable_border else 15
+            border_width = st.slider("Border Line Width", 0.5, 5.0, 1.5) if enable_border else 1.5
+            border_style = st.selectbox("Border Style", ["Solid", "Dashed", "Double"]) if enable_border else "Solid"
+            border_color_hex = st.color_picker("Border Hex Color", "#000000") if enable_border else "#000000"
+            border_scope = st.radio("Border Scope", ["All Pages", "First Page Only"], horizontal=True) if enable_border else "All Pages"
 
             st.subheader("6. Scanned PDF OCR Search")
             enable_ocr = st.checkbox("Perform OCR on Scanned Pages")
@@ -346,6 +350,10 @@ with tab_pdf:
 
             processed_total = len(new_doc)
             if processed_total > 0:
+                # Convert hex color to normalized RGB float tuple (0.0 to 1.0)
+                hex_str = border_color_hex.lstrip('#')
+                border_rgb = tuple(int(hex_str[i:i+2], 16) / 255.0 for i in (0, 2, 4))
+
                 for idx in range(processed_total):
                     page = new_doc[idx]
                     rect = page.rect
@@ -369,11 +377,32 @@ with tab_pdf:
                         page.apply_redactions()
 
                     if enable_border:
-                        b_rect = pymupdf.Rect(border_inset, border_inset, rect.width - border_inset, rect.height - border_inset)
-                        shape = page.new_shape()
-                        shape.draw_rect(b_rect)
-                        shape.finish(color=(0,0,0), width=1.5)
-                        shape.commit()
+                        apply_this_page = (border_scope == "All Pages") or (idx == 0)
+                        if apply_this_page:
+                            b_rect = pymupdf.Rect(border_inset, border_inset, rect.width - border_inset, rect.height - border_inset)
+                            shape = page.new_shape()
+                            
+                            if border_style == "Solid":
+                                shape.draw_rect(b_rect)
+                                shape.finish(color=border_rgb, width=border_width)
+                                shape.commit()
+                            elif border_style == "Dashed":
+                                shape.draw_rect(b_rect)
+                                shape.finish(color=border_rgb, width=border_width, dashes=[4, 4])
+                                shape.commit()
+                            elif border_style == "Double":
+                                # Outer boundary box
+                                shape.draw_rect(b_rect)
+                                shape.finish(color=border_rgb, width=border_width)
+                                shape.commit()
+                                # Inner framing box offset
+                                inner_inset = border_inset + border_width * 1.5
+                                if inner_inset < min(rect.width, rect.height) / 2:
+                                    in_rect = pymupdf.Rect(inner_inset, inner_inset, rect.width - inner_inset, rect.height - inner_inset)
+                                    shape2 = page.new_shape()
+                                    shape2.draw_rect(in_rect)
+                                    shape2.finish(color=border_rgb, width=border_width * 0.75)
+                                    shape2.commit()
 
                     if enable_watermark and wm_text:
                         center_point = pymupdf.Point(rect.width / 2, rect.height / 2)
